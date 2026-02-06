@@ -206,7 +206,14 @@ def export_pdf():
     return send_from_directory(UPLOAD_DIR, "VideoGPT_Report.pdf", as_attachment=True)
 
 # ================= RUN =================
+p# ================= RUN =================
 if __name__ == "__main__":
-    print("🚀 VideoGPT server running")
-    if __name__ == "__main__":
-        app.run(host="0.0.0.0", port=10000) 
+    port = int(os.environ.get("PORT", 10000))
+
+    print(f"🚀 VideoGPT running on port {port}")
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
