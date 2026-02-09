@@ -1,0 +1,10 @@
+﻿services:
+  - type: web
+    name: object_detection_app
+    env: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: gunicorn backend.app:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.13
