@@ -6,211 +6,308 @@ from PIL import Image
 import yt_dlp
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-from datetime import datetime
+from werkzeug.utils import secure_filename
+from deepface import DeepFace
 
 # ================= PATHS =================
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend")
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov8n.pt")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+
 # ================= APP =================
-app = Flask(
-    __name__,
-    static_folder="../frontend",
-    static_url_path=""
-)
-model = YOLO(MODEL_PATH)
+
+app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
+
+
+# ================= LOAD YOLO =================
+
+print("Loading YOLO model...")
+model = YOLO("yolov8s.pt")
+print("YOLO loaded successfully")
+
 
 # ================= GLOBAL STATE =================
+
 video_summary = {}
 
+
+# ================= FILE VALIDATION =================
+
+def validate_file(path):
+
+    if not os.path.exists(path):
+        return False, "File does not exist"
+
+    if os.path.getsize(path) < 1000:
+        return False, "File corrupted"
+
+    return True, None
+
+
+# ================= GENDER DETECTION =================
+
+def detect_gender(crop):
+
+    try:
+
+        result = DeepFace.analyze(
+            crop,
+            actions=['gender'],
+            enforce_detection=False,
+            silent=True
+        )
+
+        return result[0]["dominant_gender"]
+
+    except:
+        return None
+
+
+# ================= SUMMARY GENERATOR =================
+
+def generate_scene_summary(male, female, object_freq):
+
+    total = male + female
+
+    sorted_objects = sorted(
+        object_freq.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    objects = [obj for obj, count in sorted_objects[:5]]
+
+    if "laptop" in objects or "cell phone" in objects:
+        environment = "a workspace or office environment"
+
+    elif "dining table" in objects:
+        environment = "a dining or living area"
+
+    elif "dog" in objects:
+        environment = "a home environment"
+
+    else:
+        environment = "an indoor environment"
+
+
+    summary = (
+        f"The video shows {environment}. "
+        f"There are approximately {total} unique people present "
+        f"({male} males and {female} females). "
+        f"Common objects include {', '.join(objects)}."
+    )
+
+    return summary
+
+
 # ================= FRONTEND =================
+
 @app.route("/")
 def home():
     return app.send_static_file("index.html")
 
 
-@app.route("/css/<path:p>")
-def css(p):
-    return send_from_directory(os.path.join(FRONTEND_DIR, "css"), p)
+@app.route("/uploads/<path:p>")
+def uploads(p):
+    return send_from_directory(UPLOAD_DIR, p)
 
-@app.route("/js/<path:p>")
-def js(p):
-    return send_from_directory(os.path.join(FRONTEND_DIR, "js"), p)
 
-# ================= PROCESS =================
+# ================= PROCESS ROUTE =================
+
 @app.route("/process", methods=["POST"])
 def process():
+
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"})
+
     file = request.files["file"]
-    path = os.path.join(UPLOAD_DIR, file.filename)
+
+    filename = secure_filename(file.filename)
+
+    path = os.path.join(UPLOAD_DIR, filename)
+
     file.save(path)
 
-    if path.lower().endswith((".jpg", ".png", ".jpeg", ".webp")):
+    if filename.lower().endswith((".jpg",".png",".jpeg",".webp")):
         return process_image(path)
-    else:
-        return process_video(path)
-
-# ================= IMAGE =================
-def process_image(path):
-    if path.endswith(".webp"):
-        img = Image.open(path).convert("RGB")
-        path = path.replace(".webp", ".jpg")
-        img.save(path)
-
-    results = model(path, imgsz=640, verbose=False)
-    objects = {model.names[int(c)] for c in results[0].boxes.cls.tolist()}
-
-    return jsonify({"visual_objects": list(objects)})
-
-# ================= VIDEO =================
-def process_video(path):
-    global video_summary
-
-    cap = cv2.VideoCapture(path)
-    frame_count = 0
-    object_freq = {}
-    person_ids = set()
-
-    FRAME_SKIP = 12  # speed + stability
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame_count += 1
-        if frame_count % FRAME_SKIP != 0:
-            continue
-
-        results = model.track(
-            frame,
-            persist=True,
-            conf=0.4,
-            imgsz=480,
-            verbose=False
-        )
-
-        if not results or not results[0].boxes:
-            continue
-
-        for box in results[0].boxes:
-            cls_name = model.names[int(box.cls[0])]
-            object_freq[cls_name] = object_freq.get(cls_name, 0) + 1
-
-            if cls_name == "person" and box.id is not None:
-                person_ids.add(int(box.id[0]))
-
-    cap.release()
-
-    summary = (
-        f"The video contains {len(object_freq)} object types. "
-        f"{len(person_ids)} unique people appear in the video. "
-        f"Most common objects: "
-        f"{', '.join(sorted(object_freq, key=object_freq.get, reverse=True)[:5])}."
-    )
-
-    video_summary = {
-        "unique_people": len(person_ids),
-        "visual_objects": list(object_freq.keys()),
-        "content_summary": summary,
-        "download_video": f"/uploads/{os.path.basename(path)}"
-    }
-
-    return jsonify(video_summary)
-
-# ================= YOUTUBE =================
-@app.route("/process_link", methods=["POST"])
-def process_link():
-    url = request.json["url"]
-    path = os.path.join(UPLOAD_DIR, "youtube.mp4")
-
-    with yt_dlp.YoutubeDL({
-        "outtmpl": path,
-        "format": "mp4",
-        "quiet": True
-    }) as ydl:
-        ydl.download([url])
 
     return process_video(path)
 
-# ================= CHAT =================
-@app.route("/chat", methods=["POST"])
-def chat():
-    msg = request.json["message"].lower().strip()
 
-    if not video_summary:
-        return jsonify({
-            "reply": "Please analyze a video first, then ask me questions 🙂"
-        })
+# ================= IMAGE PROCESS =================
 
-    people = video_summary["unique_people"]
-    objects = video_summary["visual_objects"]
-    summary = video_summary["content_summary"]
+def process_image(path):
 
-    if "people" in msg or "persons" in msg:
-        return jsonify({"reply": f"There are {people} unique people in the video."})
+    frame = cv2.imread(path)
 
-    if "object" in msg or "inside" in msg:
-        return jsonify({
-            "reply": f"I detected objects such as: {', '.join(objects[:8])}"
-            if objects else "No clear objects were detected."
-        })
+    results = model(frame, conf=0.25)
 
-    if "summary" in msg or "explain" in msg:
-        return jsonify({"reply": summary})
+    male = 0
+    female = 0
+    object_freq = {}
+
+    if results[0].boxes is not None:
+
+        for box in results[0].boxes:
+
+            cls_id = int(box.cls[0])
+            name = model.names[cls_id]
+
+            object_freq[name] = object_freq.get(name,0)+1
+
+            if name == "person":
+
+                x1,y1,x2,y2 = map(int, box.xyxy[0])
+
+                crop = frame[y1:y2, x1:x2]
+
+                gender = detect_gender(crop)
+
+                if gender == "Man":
+                    male += 1
+
+                elif gender == "Woman":
+                    female += 1
+
+
+    summary = generate_scene_summary(male,female,object_freq)
 
     return jsonify({
-        "reply": (
-            "You can ask me:\n"
-            "• How many people are in the video\n"
-            "• What objects are present\n"
-            "• Give me a summary of the video"
-        )
+
+        "male": male,
+        "female": female,
+        "unique_people": male+female,
+        "visual_objects": list(object_freq.keys()),
+        "content_summary": summary
+
     })
 
-# ================= PDF EXPORT =================
-@app.route("/export_pdf", methods=["GET"])
-def export_pdf():
+
+# ================= VIDEO PROCESS WITH TRACKING =================
+
+def process_video(path):
+
+    global video_summary
+
+    male_ids = set()
+    female_ids = set()
+    all_ids = set()
+
+    object_freq = {}
+
+    print("Processing video with tracking...")
+
+    results = model.track(
+        source=path,
+        conf=0.25,
+        persist=True,
+        stream=True,
+        tracker="bytetrack.yaml"
+    )
+
+    for r in results:
+
+        if r.boxes is None:
+            continue
+
+        frame = r.orig_img
+
+        boxes = r.boxes.xyxy.cpu().numpy()
+        classes = r.boxes.cls.cpu().numpy()
+        ids = r.boxes.id
+
+        if ids is None:
+            continue
+
+        ids = ids.cpu().numpy()
+
+        for box, cls_id, track_id in zip(boxes, classes, ids):
+
+            name = model.names[int(cls_id)]
+
+            object_freq[name] = object_freq.get(name,0)+1
+
+            if name != "person":
+                continue
+
+            if track_id in all_ids:
+                continue
+
+            x1,y1,x2,y2 = map(int, box)
+
+            crop = frame[y1:y2, x1:x2]
+
+            gender = detect_gender(crop)
+
+            if gender == "Man":
+
+                male_ids.add(track_id)
+                all_ids.add(track_id)
+
+            elif gender == "Woman":
+
+                female_ids.add(track_id)
+                all_ids.add(track_id)
+
+
+    male = len(male_ids)
+    female = len(female_ids)
+
+    summary = generate_scene_summary(male,female,object_freq)
+
+    video_summary = {
+
+        "male": male,
+        "female": female,
+        "unique_people": male+female,
+        "visual_objects": list(object_freq.keys()),
+        "content_summary": summary,
+        "download_video": f"/uploads/{os.path.basename(path)}"
+
+    }
+
+    print("Tracking completed")
+
+    return jsonify(video_summary)
+
+
+# ================= CHAT =================
+
+@app.route("/chat", methods=["POST"])
+def chat():
+
     if not video_summary:
-        return jsonify({"error": "Analyze a video first"}), 400
+        return jsonify({"reply":"Analyze video first"})
 
-    pdf_path = os.path.join(UPLOAD_DIR, "VideoGPT_Report.pdf")
-    c = canvas.Canvas(pdf_path, pagesize=A4)
-    width, height = A4
-    y = height - 50
+    return jsonify({"reply":video_summary["content_summary"]})
 
-    c.setFont("Helvetica-Bold", 22)
-    c.drawString(50, y, "VideoGPT – Video Analysis Report")
-    y -= 40
 
-    c.setFont("Helvetica", 10)
-    c.drawString(50, y, f"Generated on: {datetime.now().strftime('%d %b %Y, %H:%M')}")
-    y -= 30
+# ================= PDF =================
 
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, y, "Summary")
-    y -= 20
+@app.route("/export_pdf")
+def export_pdf():
 
-    c.setFont("Helvetica", 11)
-    text = c.beginText(50, y)
-    for line in video_summary["content_summary"].split(". "):
-        text.textLine(line.strip())
-    c.drawText(text)
+    pdf_path = os.path.join(UPLOAD_DIR,"report.pdf")
 
-    c.showPage()
+    c = canvas.Canvas(pdf_path,pagesize=A4)
+
+    c.drawString(50,800,"VideoGPT Report")
+    c.drawString(50,760,video_summary.get("content_summary",""))
+
     c.save()
 
-    return send_from_directory(UPLOAD_DIR, "VideoGPT_Report.pdf", as_attachment=True)
+    return send_from_directory(UPLOAD_DIR,"report.pdf",as_attachment=True)
+
 
 # ================= RUN =================
-p# ================= RUN =================
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
 
-    print(f"🚀 VideoGPT running on port {port}")
+if __name__ == "__main__":
+
+    port = int(os.environ.get("PORT", 10000))
 
     app.run(
         host="0.0.0.0",
