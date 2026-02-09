@@ -20,12 +20,17 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ================= APP =================
 
-app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
+app = Flask(
+    __name__,
+    static_folder=FRONTEND_DIR,
+    static_url_path=""
+)
+
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
 
 # ================= LOAD MODEL =================
 
-print("Loading YOLO...")
+print("Loading YOLO model...")
 model = YOLO(MODEL_PATH)
 model.to("cpu")
 print("YOLO loaded successfully")
@@ -74,12 +79,15 @@ def generate_scene_summary(male, female, object_freq):
 
     objects = [obj for obj, count in sorted_objects[:5]]
 
-    if "laptop" in objects:
+    if "laptop" in objects or "cell phone" in objects:
         env = "a workspace or office environment"
+
     elif "dining table" in objects:
         env = "a dining area"
+
     elif "dog" in objects:
         env = "a home environment"
+
     else:
         env = "an indoor environment"
 
@@ -90,19 +98,23 @@ def generate_scene_summary(male, female, object_freq):
         f"Common objects include {', '.join(objects)}."
     )
 
+
 # ================= FRONTEND =================
 
 @app.route("/")
 def home():
     return send_from_directory(FRONTEND_DIR, "index.html")
 
-@app.route("/<path:path>")
-def static_files(path):
-    return send_from_directory(FRONTEND_DIR, path)
 
 @app.route("/uploads/<path:path>")
 def uploads(path):
     return send_from_directory(UPLOAD_DIR, path)
+
+
+@app.route("/<path:path>")
+def static_files(path):
+    return send_from_directory(FRONTEND_DIR, path)
+
 
 # ================= FILE PROCESS =================
 
@@ -116,6 +128,9 @@ def process():
 
         file = request.files["file"]
 
+        if file.filename == "":
+            return jsonify({"error": "Empty filename"}), 400
+
         filename = secure_filename(file.filename)
 
         path = os.path.join(UPLOAD_DIR, filename)
@@ -124,9 +139,7 @@ def process():
 
         print("File saved:", path)
 
-        if filename.lower().endswith(
-            (".jpg", ".jpeg", ".png", ".webp")
-        ):
+        if filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
             return process_image(path)
 
         return process_video(path)
@@ -137,7 +150,7 @@ def process():
         return jsonify({"error": str(e)}), 500
 
 
-# ================= FIXED YOUTUBE PROCESS =================
+# ================= YOUTUBE PROCESS (RENDER SAFE) =================
 
 @app.route("/process_link", methods=["POST"])
 def process_link():
@@ -161,7 +174,7 @@ def process_link():
         if os.path.exists(output_path):
             os.remove(output_path)
 
-        # ✅ RENDER SAFE SETTINGS
+        # RENDER SAFE SETTINGS
         ydl_opts = {
 
             "format": "worst[ext=mp4]/worst",
@@ -235,6 +248,7 @@ def process_image(path):
 
             if gender == "Man":
                 male += 1
+
             elif gender == "Woman":
                 female += 1
 
@@ -300,6 +314,7 @@ def process_video(path):
 
             if gender == "Man":
                 male += 1
+
             elif gender == "Woman":
                 female += 1
 
