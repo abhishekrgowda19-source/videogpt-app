@@ -1,10 +1,9 @@
 flask
-ultralytics
-opencv-python
-pillow
-yt-dlp
-numpy
-deepface
-torch
-reportlab
 gunicorn
+ultralytics
+opencv-python-headless
+deepface
+yt-dlp
+reportlab
+pillow
+numpy
