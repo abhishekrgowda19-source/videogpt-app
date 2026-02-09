@@ -7,20 +7,17 @@ from reportlab.pdfgen import canvas
 from werkzeug.utils import secure_filename
 from deepface import DeepFace
 
-
 # ================= PATHS =================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# frontend folder inside backend
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
-
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 MODEL_PATH = os.path.join(BASE_DIR, "yolov8s.pt")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # ================= APP =================
 
@@ -30,24 +27,28 @@ app = Flask(
     static_url_path=""
 )
 
+# Allow large uploads (200MB)
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
 
 # ================= LOAD YOLO =================
 
 print("Loading YOLO model...")
-model = YOLO(MODEL_PATH)
-print("YOLO loaded successfully")
 
+model = YOLO(MODEL_PATH)
+model.to("cpu")   # IMPORTANT for Render
+
+print("YOLO loaded successfully")
 
 # ================= GLOBAL STATE =================
 
 video_summary = {}
-
 
 # ================= SAFE GENDER DETECTION =================
 
 def detect_gender(crop):
 
     try:
+
         if crop is None or crop.size == 0:
             return None
 
@@ -60,7 +61,9 @@ def detect_gender(crop):
 
         return result[0]["dominant_gender"]
 
-    except:
+    except Exception as e:
+
+        print("Gender detection error:", e)
         return None
 
 
@@ -122,7 +125,6 @@ def serve_uploads(path):
     return send_from_directory(UPLOAD_DIR, path)
 
 
-# fallback route (IMPORTANT for Render)
 @app.route("/<path:path>")
 def serve_static(path):
     return send_from_directory(FRONTEND_DIR, path)
@@ -133,161 +135,183 @@ def serve_static(path):
 @app.route("/process", methods=["POST"])
 def process():
 
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"})
+    try:
 
-    file = request.files["file"]
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"})
 
-    if file.filename == "":
-        return jsonify({"error": "No filename"})
+        file = request.files["file"]
 
-    filename = secure_filename(file.filename)
+        if file.filename == "":
+            return jsonify({"error": "No filename"})
 
-    path = os.path.join(UPLOAD_DIR, filename)
+        filename = secure_filename(file.filename)
 
-    file.save(path)
+        path = os.path.join(UPLOAD_DIR, filename)
 
-    if filename.lower().endswith((".jpg",".jpeg",".png",".webp")):
-        return process_image(path)
+        file.save(path)
 
-    return process_video(path)
+        print("Saved file:", path)
+
+        if filename.lower().endswith((".jpg",".jpeg",".png",".webp")):
+            return process_image(path)
+
+        return process_video(path)
+
+    except Exception as e:
+
+        print("PROCESS ERROR:", str(e))
+        return jsonify({"error": str(e)})
 
 
 # ================= IMAGE =================
 
 def process_image(path):
 
-    frame = cv2.imread(path)
+    try:
 
-    if frame is None:
-        return jsonify({"error": "Invalid image"})
+        frame = cv2.imread(path)
 
-    results = model(frame, conf=0.25)
+        if frame is None:
+            return jsonify({"error": "Invalid image"})
 
-    male_ids = set()
-    female_ids = set()
+        results = model(frame, conf=0.25, device="cpu")
 
-    object_freq = {}
+        male_ids = set()
+        female_ids = set()
 
-    if results and results[0].boxes is not None:
+        object_freq = {}
 
-        for box in results[0].boxes:
+        if results and results[0].boxes is not None:
 
-            cls_id = int(box.cls[0])
-            name = model.names[cls_id]
+            for box in results[0].boxes:
 
-            object_freq[name] = object_freq.get(name, 0) + 1
+                cls_id = int(box.cls[0])
+                name = model.names[cls_id]
 
-            if name == "person":
+                object_freq[name] = object_freq.get(name, 0) + 1
 
-                x1,y1,x2,y2 = map(int, box.xyxy[0])
+                if name == "person":
+
+                    x1,y1,x2,y2 = map(int, box.xyxy[0])
+
+                    crop = frame[y1:y2, x1:x2]
+
+                    gender = detect_gender(crop)
+
+                    if gender == "Man":
+                        male_ids.add(id(box))
+
+                    elif gender == "Woman":
+                        female_ids.add(id(box))
+
+        male = len(male_ids)
+        female = len(female_ids)
+
+        summary = generate_scene_summary(male,female,object_freq)
+
+        return jsonify({
+            "male": male,
+            "female": female,
+            "unique_people": male+female,
+            "visual_objects": list(object_freq.keys()),
+            "content_summary": summary
+        })
+
+    except Exception as e:
+
+        print("Image processing error:", e)
+        return jsonify({"error": str(e)})
+
+
+# ================= VIDEO =================
+
+def process_video(path):
+
+    global video_summary
+
+    try:
+
+        male_ids = set()
+        female_ids = set()
+        all_ids = set()
+
+        object_freq = {}
+
+        print("Processing video:", path)
+
+        results = model.track(
+            source=path,
+            conf=0.25,
+            persist=True,
+            stream=True,
+            tracker="bytetrack.yaml",
+            device="cpu"
+        )
+
+        for r in results:
+
+            if r.boxes is None:
+                continue
+
+            frame = r.orig_img
+
+            boxes = r.boxes.xyxy.cpu().numpy()
+            classes = r.boxes.cls.cpu().numpy()
+            ids = r.boxes.id
+
+            if ids is None:
+                continue
+
+            ids = ids.cpu().numpy()
+
+            for box, cls_id, track_id in zip(boxes, classes, ids):
+
+                name = model.names[int(cls_id)]
+
+                object_freq[name] = object_freq.get(name,0)+1
+
+                if name != "person":
+                    continue
+
+                if track_id in all_ids:
+                    continue
+
+                x1,y1,x2,y2 = map(int, box)
 
                 crop = frame[y1:y2, x1:x2]
 
                 gender = detect_gender(crop)
 
                 if gender == "Man":
-                    male_ids.add(id(box))
+                    male_ids.add(track_id)
+                    all_ids.add(track_id)
 
                 elif gender == "Woman":
-                    female_ids.add(id(box))
+                    female_ids.add(track_id)
+                    all_ids.add(track_id)
 
+        male = len(male_ids)
+        female = len(female_ids)
 
-    male = len(male_ids)
-    female = len(female_ids)
+        summary = generate_scene_summary(male,female,object_freq)
 
-    summary = generate_scene_summary(male,female,object_freq)
+        video_summary = {
+            "male": male,
+            "female": female,
+            "unique_people": male+female,
+            "visual_objects": list(object_freq.keys()),
+            "content_summary": summary
+        }
 
-    return jsonify({
-        "male": male,
-        "female": female,
-        "unique_people": male+female,
-        "visual_objects": list(object_freq.keys()),
-        "content_summary": summary
-    })
+        print("Video processing completed")
 
+        return jsonify(video_summary)
 
-# ================= VIDEO TRACKING =================
+    except Exception as e:
 
-def process_video(path):
-
-    global video_summary
-
-    male_ids = set()
-    female_ids = set()
-    all_ids = set()
-
-    object_freq = {}
-
-    print("Processing video with tracking...")
-
-    results = model.track(
-        source=path,
-        conf=0.25,
-        persist=True,
-        stream=True,
-        tracker="bytetrack.yaml"
-    )
-
-    for r in results:
-
-        if r.boxes is None:
-            continue
-
-        frame = r.orig_img
-
-        boxes = r.boxes.xyxy.cpu().numpy()
-        classes = r.boxes.cls.cpu().numpy()
-        ids = r.boxes.id
-
-        if ids is None:
-            continue
-
-        ids = ids.cpu().numpy()
-
-        for box, cls_id, track_id in zip(boxes, classes, ids):
-
-            name = model.names[int(cls_id)]
-
-            object_freq[name] = object_freq.get(name,0)+1
-
-            if name != "person":
-                continue
-
-            if track_id in all_ids:
-                continue
-
-            x1,y1,x2,y2 = map(int, box)
-
-            crop = frame[y1:y2, x1:x2]
-
-            gender = detect_gender(crop)
-
-            if gender == "Man":
-                male_ids.add(track_id)
-                all_ids.add(track_id)
-
-            elif gender == "Woman":
-                female_ids.add(track_id)
-                all_ids.add(track_id)
-
-
-    male = len(male_ids)
-    female = len(female_ids)
-
-    summary = generate_scene_summary(male,female,object_freq)
-
-    video_summary = {
-        "male": male,
-        "female": female,
-        "unique_people": male+female,
-        "visual_objects": list(object_freq.keys()),
-        "content_summary": summary
-    }
-
-    print("Tracking completed")
-
-    return jsonify(video_summary)
+        print("VIDEO ERROR:", str(e))
+        return jsonify({"error": str(e)})
 
 
 # ================= CHAT =================
