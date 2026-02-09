@@ -3,6 +3,7 @@ from ultralytics import YOLO
 import os
 import cv2
 import gc
+import yt_dlp
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from werkzeug.utils import secure_filename
@@ -42,7 +43,7 @@ print("YOLO loaded successfully")
 
 video_summary = {}
 
-# ================= GENDER (LAZY LOAD) =================
+# ================= GENDER (LAZY LOAD SAFE FOR RENDER) =================
 
 def detect_gender(crop):
 
@@ -100,7 +101,7 @@ def generate_scene_summary(male, female, object_freq):
         f"Common objects include {', '.join(objects)}."
     )
 
-# ================= ROUTES =================
+# ================= FRONTEND ROUTES =================
 
 @app.route("/")
 def home():
@@ -122,7 +123,7 @@ def uploads(path):
 def static_files(path):
     return send_from_directory(FRONTEND_DIR, path)
 
-# ================= PROCESS =================
+# ================= FILE PROCESS =================
 
 @app.route("/process", methods=["POST"])
 def process():
@@ -130,7 +131,7 @@ def process():
     try:
 
         if "file" not in request.files:
-            return jsonify({"error":"No file"})
+            return jsonify({"error":"No file uploaded"})
 
         file = request.files["file"]
 
@@ -155,7 +156,51 @@ def process():
         print("Process error:", e)
         return jsonify({"error":str(e)})
 
-# ================= IMAGE =================
+# ================= YOUTUBE PROCESS =================
+
+@app.route("/process_link", methods=["POST"])
+def process_link():
+
+    try:
+
+        data = request.json
+
+        if not data or "url" not in data:
+            return jsonify({"error":"No URL provided"})
+
+        url = data["url"]
+
+        output_path = os.path.join(UPLOAD_DIR, "youtube.mp4")
+
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+        ydl_opts = {
+            "format": "mp4",
+            "outtmpl": output_path,
+            "noplaylist": True,
+            "quiet": True
+        }
+
+        print("Downloading YouTube video...")
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        print("Download complete")
+
+        return process_video(output_path)
+
+    except Exception as e:
+
+        print("YouTube error:", e)
+
+        return jsonify({
+            "error":"YouTube processing failed",
+            "details":str(e)
+        })
+
+# ================= IMAGE PROCESS =================
 
 def process_image(path):
 
@@ -201,7 +246,7 @@ def process_image(path):
         "content_summary":summary
     })
 
-# ================= VIDEO (ULTRA SAFE FOR RENDER) =================
+# ================= VIDEO PROCESS (RENDER SAFE) =================
 
 def process_video(path):
 
@@ -226,7 +271,7 @@ def process_video(path):
 
         frame_count += 1
 
-        # PROCESS ONLY EVERY 60th FRAME
+        # Render safe optimization
         if frame_count % 60 != 0:
             continue
 
