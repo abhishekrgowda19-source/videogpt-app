@@ -3,6 +3,8 @@ gunicorn
 ultralytics
 opencv-python-headless
 deepface
+tf-keras
+tensorflow==2.16.1
 yt-dlp
 reportlab
 pillow

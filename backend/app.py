@@ -2,8 +2,6 @@ from flask import Flask, request, send_from_directory, jsonify
 from ultralytics import YOLO
 import os
 import cv2
-from PIL import Image
-import yt_dlp
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from werkzeug.utils import secure_filename
@@ -14,8 +12,8 @@ from deepface import DeepFace
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# FIXED: frontend inside backend folder
-FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+# frontend is outside backend
+FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend")
 
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
@@ -26,38 +24,19 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ================= APP =================
 
-app = Flask(
-    __name__,
-    static_folder=FRONTEND_DIR,
-    static_url_path=""
-)
+app = Flask(__name__)
 
 
 # ================= LOAD YOLO =================
 
 print("Loading YOLO model...")
-
 model = YOLO(MODEL_PATH)
-
 print("YOLO loaded successfully")
 
 
 # ================= GLOBAL STATE =================
 
 video_summary = {}
-
-
-# ================= FILE VALIDATION =================
-
-def validate_file(path):
-
-    if not os.path.exists(path):
-        return False, "File does not exist"
-
-    if os.path.getsize(path) < 1000:
-        return False, "File corrupted"
-
-    return True, None
 
 
 # ================= GENDER DETECTION =================
@@ -79,7 +58,7 @@ def detect_gender(crop):
         return None
 
 
-# ================= SUMMARY GENERATOR =================
+# ================= SUMMARY =================
 
 def generate_scene_summary(male, female, object_freq):
 
@@ -105,7 +84,6 @@ def generate_scene_summary(male, female, object_freq):
     else:
         environment = "an indoor environment"
 
-
     summary = (
         f"The video shows {environment}. "
         f"There are approximately {total} unique people present "
@@ -124,21 +102,21 @@ def home():
 
 
 @app.route("/css/<path:path>")
-def serve_css(path):
+def css(path):
     return send_from_directory(os.path.join(FRONTEND_DIR, "css"), path)
 
 
 @app.route("/js/<path:path>")
-def serve_js(path):
+def js(path):
     return send_from_directory(os.path.join(FRONTEND_DIR, "js"), path)
 
 
 @app.route("/uploads/<path:path>")
-def serve_uploads(path):
+def uploads(path):
     return send_from_directory(UPLOAD_DIR, path)
 
 
-# ================= PROCESS ROUTE =================
+# ================= PROCESS =================
 
 @app.route("/process", methods=["POST"])
 def process():
@@ -154,30 +132,23 @@ def process():
 
     file.save(path)
 
-    valid, error = validate_file(path)
-
-    if not valid:
-        return jsonify({"error": error})
-
-    if filename.lower().endswith((".jpg",".png",".jpeg",".webp")):
+    if filename.lower().endswith((".jpg",".jpeg",".png",".webp")):
         return process_image(path)
 
     return process_video(path)
 
 
-# ================= IMAGE PROCESS =================
+# ================= IMAGE =================
 
 def process_image(path):
 
     frame = cv2.imread(path)
 
-    if frame is None:
-        return jsonify({"error": "Cannot read image"})
-
     results = model(frame, conf=0.25)
 
-    male = 0
-    female = 0
+    male_ids = set()
+    female_ids = set()
+
     object_freq = {}
 
     if results[0].boxes is not None:
@@ -198,26 +169,27 @@ def process_image(path):
                 gender = detect_gender(crop)
 
                 if gender == "Man":
-                    male += 1
+                    male_ids.add(id(box))
 
                 elif gender == "Woman":
-                    female += 1
+                    female_ids.add(id(box))
 
+
+    male = len(male_ids)
+    female = len(female_ids)
 
     summary = generate_scene_summary(male,female,object_freq)
 
     return jsonify({
-
         "male": male,
         "female": female,
         "unique_people": male+female,
         "visual_objects": list(object_freq.keys()),
         "content_summary": summary
-
     })
 
 
-# ================= VIDEO PROCESS WITH TRACKING =================
+# ================= VIDEO WITH TRACKING =================
 
 def process_video(path):
 
@@ -228,8 +200,6 @@ def process_video(path):
     all_ids = set()
 
     object_freq = {}
-
-    print("Processing video with tracking...")
 
     results = model.track(
         source=path,
@@ -274,12 +244,10 @@ def process_video(path):
             gender = detect_gender(crop)
 
             if gender == "Man":
-
                 male_ids.add(track_id)
                 all_ids.add(track_id)
 
             elif gender == "Woman":
-
                 female_ids.add(track_id)
                 all_ids.add(track_id)
 
@@ -290,16 +258,12 @@ def process_video(path):
     summary = generate_scene_summary(male,female,object_freq)
 
     video_summary = {
-
         "male": male,
         "female": female,
         "unique_people": male+female,
         "visual_objects": list(object_freq.keys()),
         "content_summary": summary
-
     }
-
-    print("Tracking completed")
 
     return jsonify(video_summary)
 
@@ -325,7 +289,6 @@ def export_pdf():
     c = canvas.Canvas(pdf_path,pagesize=A4)
 
     c.drawString(50,800,"VideoGPT Report")
-
     c.drawString(50,760,video_summary.get("content_summary",""))
 
     c.save()
