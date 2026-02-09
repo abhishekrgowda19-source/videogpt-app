@@ -20,12 +20,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ================= APP =================
 
-app = Flask(
-    __name__,
-    static_folder=FRONTEND_DIR,
-    static_url_path=""
-)
-
+app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
 
 # ================= LOAD MODEL =================
@@ -33,7 +28,7 @@ app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
 print("Loading YOLO...")
 model = YOLO(MODEL_PATH)
 model.to("cpu")
-print("YOLO loaded")
+print("YOLO loaded successfully")
 
 # ================= GLOBAL =================
 
@@ -81,13 +76,10 @@ def generate_scene_summary(male, female, object_freq):
 
     if "laptop" in objects:
         env = "a workspace or office environment"
-
     elif "dining table" in objects:
         env = "a dining area"
-
     elif "dog" in objects:
         env = "a home environment"
-
     else:
         env = "an indoor environment"
 
@@ -142,11 +134,10 @@ def process():
     except Exception as e:
 
         print("Process error:", e)
-
         return jsonify({"error": str(e)}), 500
 
 
-# ================= YOUTUBE PROCESS =================
+# ================= FIXED YOUTUBE PROCESS =================
 
 @app.route("/process_link", methods=["POST"])
 def process_link():
@@ -163,25 +154,41 @@ def process_link():
         if not url:
             return jsonify({"error": "No URL provided"}), 400
 
-        print("Downloading:", url)
+        print("Downloading YouTube:", url)
 
-        output_path = os.path.join(
-            UPLOAD_DIR,
-            "youtube.mp4"
-        )
+        output_path = os.path.join(UPLOAD_DIR, "youtube.mp4")
 
         if os.path.exists(output_path):
             os.remove(output_path)
 
+        # ✅ RENDER SAFE SETTINGS
         ydl_opts = {
-            "format": "mp4",
+
+            "format": "worst[ext=mp4]/worst",
+
             "outtmpl": output_path,
+
             "quiet": True,
-            "noplaylist": True
+
+            "noplaylist": True,
+
+            "nocheckcertificate": True,
+
+            "ignoreerrors": True,
+
+            "no_warnings": True,
+
+            "retries": 3,
+
+            "fragment_retries": 3
+
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
+
+        if not os.path.exists(output_path):
+            return jsonify({"error": "Download failed"}), 500
 
         print("Download complete")
 
@@ -192,8 +199,7 @@ def process_link():
         print("YouTube error:", e)
 
         return jsonify({
-            "error": "YouTube processing failed",
-            "details": str(e)
+            "error": str(e)
         }), 500
 
 
@@ -229,15 +235,10 @@ def process_image(path):
 
             if gender == "Man":
                 male += 1
-
             elif gender == "Woman":
                 female += 1
 
-    summary = generate_scene_summary(
-        male,
-        female,
-        object_freq
-    )
+    summary = generate_scene_summary(male, female, object_freq)
 
     return jsonify({
         "male": male,
@@ -273,7 +274,7 @@ def process_video(path):
 
         frame_count += 1
 
-        # reduce load for Render
+        # Render safe optimization
         if frame_count % 60 != 0:
             continue
 
@@ -299,17 +300,12 @@ def process_video(path):
 
             if gender == "Man":
                 male += 1
-
             elif gender == "Woman":
                 female += 1
 
     cap.release()
 
-    summary = generate_scene_summary(
-        male,
-        female,
-        object_freq
-    )
+    summary = generate_scene_summary(male, female, object_freq)
 
     video_summary = {
 
@@ -344,10 +340,7 @@ def chat():
 @app.route("/export_pdf")
 def export_pdf():
 
-    path = os.path.join(
-        UPLOAD_DIR,
-        "report.pdf"
-    )
+    path = os.path.join(UPLOAD_DIR, "report.pdf")
 
     c = canvas.Canvas(path, pagesize=A4)
 
@@ -356,10 +349,7 @@ def export_pdf():
     c.drawString(
         50,
         760,
-        video_summary.get(
-            "content_summary",
-            ""
-        )
+        video_summary.get("content_summary", "")
     )
 
     c.save()
