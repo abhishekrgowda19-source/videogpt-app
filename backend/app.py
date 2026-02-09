@@ -12,8 +12,8 @@ from deepface import DeepFace
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# frontend is outside backend
-FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend")
+# FIXED: frontend inside backend
+FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 
@@ -44,14 +44,12 @@ video_summary = {}
 def detect_gender(crop):
 
     try:
-
         result = DeepFace.analyze(
             crop,
             actions=['gender'],
             enforce_detection=False,
             silent=True
         )
-
         return result[0]["dominant_gender"]
 
     except:
@@ -102,18 +100,24 @@ def home():
 
 
 @app.route("/css/<path:path>")
-def css(path):
+def serve_css(path):
     return send_from_directory(os.path.join(FRONTEND_DIR, "css"), path)
 
 
 @app.route("/js/<path:path>")
-def js(path):
+def serve_js(path):
     return send_from_directory(os.path.join(FRONTEND_DIR, "js"), path)
 
 
 @app.route("/uploads/<path:path>")
-def uploads(path):
+def serve_uploads(path):
     return send_from_directory(UPLOAD_DIR, path)
+
+
+# IMPORTANT fallback route
+@app.route("/<path:path>")
+def serve_static(path):
+    return send_from_directory(FRONTEND_DIR, path)
 
 
 # ================= PROCESS =================
