@@ -1,14 +1,11 @@
-from flask import Flask, request, send_from_directory, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from ultralytics import YOLO
 import os
 import cv2
 import gc
-import yt_dlp
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 from werkzeug.utils import secure_filename
 
-# ================= PATH SETUP =================
+# ================= CONFIG =================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
@@ -16,21 +13,19 @@ MODEL_PATH = os.path.join(BASE_DIR, "yolov8s.pt")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# ================= APP INIT =================
-
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB limit
 
 # ================= LOAD MODEL =================
 
 print("Loading YOLO model...")
 
-model = YOLO(MODEL_PATH)
-model.to("cpu")
-
-print("YOLO loaded successfully")
-
-# ================= GLOBAL =================
+try:
+    model = YOLO(MODEL_PATH)
+    model.to("cpu")
+    print("YOLO loaded successfully")
+except Exception as e:
+    print("Model load error:", e)
 
 video_summary = {}
 
@@ -38,44 +33,13 @@ video_summary = {}
 
 @app.route("/")
 def home():
-    return "VideoGPT Backend is running"
+    return "VideoGPT backend running"
 
 @app.route("/test")
 def test():
-    return "Backend is working"
+    return "Backend OK"
 
-# ================= SUMMARY =================
-
-def generate_scene_summary(person_count, object_freq):
-
-    sorted_objects = sorted(
-        object_freq.items(),
-        key=lambda x: x[1],
-        reverse=True
-    )
-
-    objects = [obj for obj, count in sorted_objects[:5]]
-
-    if "laptop" in objects:
-        env = "a workspace or office environment"
-    elif "dining table" in objects:
-        env = "a dining area"
-    elif "car" in objects:
-        env = "an outdoor street environment"
-    elif "dog" in objects:
-        env = "a home environment"
-    else:
-        env = "an indoor environment"
-
-    objects_text = ", ".join(objects) if objects else "no major objects detected"
-
-    return (
-        f"The video shows {env}. "
-        f"There are approximately {person_count} people present. "
-        f"Common objects include {objects_text}."
-    )
-
-# ================= PROCESS FILE =================
+# ================= PROCESS ROUTE =================
 
 @app.route("/process", methods=["POST"])
 def process():
@@ -87,71 +51,24 @@ def process():
 
         file = request.files["file"]
 
-        if file.filename == "":
-            return jsonify({"error": "Empty filename"}), 400
-
         filename = secure_filename(file.filename)
+
         path = os.path.join(UPLOAD_DIR, filename)
 
         file.save(path)
 
-        print("File saved:", path)
-
-        if filename.lower().endswith((".jpg", ".jpeg", ".png")):
-            return process_image(path)
+        print("Saved:", path)
 
         return process_video(path)
 
     except Exception as e:
 
         print("Process error:", e)
+
         return jsonify({"error": str(e)}), 500
 
-# ================= IMAGE =================
 
-def process_image(path):
-
-    frame = cv2.imread(path)
-
-    if frame is None:
-        return jsonify({"error": "Invalid image"}), 400
-
-    person_count = 0
-    object_freq = {}
-
-    results = model.predict(
-        frame,
-        conf=0.25,
-        imgsz=320,
-        device="cpu",
-        verbose=False
-    )
-
-    if results and results[0].boxes is not None:
-
-        for box in results[0].boxes:
-
-            cls = int(box.cls[0])
-            name = model.names[cls]
-
-            object_freq[name] = object_freq.get(name, 0) + 1
-
-            if name == "person":
-                person_count += 1
-
-    summary = generate_scene_summary(person_count, object_freq)
-
-    result = {
-        "person_count": person_count,
-        "visual_objects": list(object_freq.keys()),
-        "content_summary": summary
-    }
-
-    print("Image result:", result)
-
-    return jsonify(result)
-
-# ================= VIDEO =================
+# ================= VIDEO PROCESS =================
 
 def process_video(path):
 
@@ -162,45 +79,8 @@ def process_video(path):
 
     return analyze_video(cap)
 
-# ================= VIDEO STREAM =================
 
-@app.route("/process_link", methods=["POST"])
-def process_link():
-
-    try:
-
-        data = request.get_json()
-
-        if not data or "url" not in data:
-            return jsonify({"error": "No URL provided"}), 400
-
-        url = data["url"]
-
-        ydl_opts = {
-            "quiet": True,
-            "format": "worst",
-            "noplaylist": True,
-            "skip_download": True
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
-            info = ydl.extract_info(url, download=False)
-            stream_url = info["url"]
-
-        cap = cv2.VideoCapture(stream_url)
-
-        if not cap.isOpened():
-            return jsonify({"error": "Cannot open stream"}), 400
-
-        return analyze_video(cap)
-
-    except Exception as e:
-
-        print("YouTube error:", e)
-        return jsonify({"error": str(e)}), 500
-
-# ================= CORE ANALYSIS =================
+# ================= SAFE ANALYSIS =================
 
 def analyze_video(cap):
 
@@ -210,9 +90,9 @@ def analyze_video(cap):
     object_freq = {}
 
     frame_count = 0
-    MAX_FRAMES = 30  # prevent timeout
+    MAX_FRAMES = 20   # CRITICAL FIX
 
-    print("Starting video analysis...")
+    print("Starting safe analysis")
 
     while cap.isOpened():
 
@@ -224,19 +104,16 @@ def analyze_video(cap):
         frame_count += 1
 
         if frame_count > MAX_FRAMES:
-            print("Stopping early to avoid timeout")
             break
 
-        if frame_count % 10 != 0:
+        if frame_count % 5 != 0:
             continue
 
         try:
 
-            gc.collect()
-
             results = model.predict(
                 frame,
-                conf=0.3,
+                conf=0.4,
                 imgsz=320,
                 device="cpu",
                 verbose=False
@@ -246,22 +123,21 @@ def analyze_video(cap):
 
                 for box in results[0].boxes:
 
-                    cls = int(box.cls[0])
-                    name = model.names[cls]
+                    name = model.names[int(box.cls[0])]
 
                     object_freq[name] = object_freq.get(name, 0) + 1
 
                     if name == "person":
                         person_count += 1
 
-            print(f"Frame {frame_count} | Persons: {person_count}")
-
         except Exception as e:
-            print("Frame error:", e)
+            print("Detection error:", e)
+
+        gc.collect()
 
     cap.release()
 
-    summary = generate_scene_summary(person_count, object_freq)
+    summary = f"Detected {person_count} persons. Objects: {list(object_freq.keys())}"
 
     video_summary = {
         "person_count": person_count,
@@ -269,39 +145,10 @@ def analyze_video(cap):
         "content_summary": summary
     }
 
-    print("Final summary:", video_summary)
+    print("Completed safely")
 
     return jsonify(video_summary)
 
-# ================= CHAT =================
-
-@app.route("/chat", methods=["POST"])
-def chat():
-
-    if not video_summary:
-        return jsonify({"reply": "Analyze video first"})
-
-    return jsonify({"reply": video_summary["content_summary"]})
-
-# ================= PDF =================
-
-@app.route("/export_pdf")
-def export_pdf():
-
-    path = os.path.join(UPLOAD_DIR, "report.pdf")
-
-    c = canvas.Canvas(path, pagesize=A4)
-
-    c.drawString(50, 800, "VideoGPT Report")
-    c.drawString(50, 760, video_summary.get("content_summary", ""))
-
-    c.save()
-
-    return send_from_directory(
-        UPLOAD_DIR,
-        "report.pdf",
-        as_attachment=True
-    )
 
 # ================= RUN =================
 
@@ -309,10 +156,4 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 10000))
 
-    print("Server running on port:", port)
-
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False
-    )
+    app.run(host="0.0.0.0", port=port)
