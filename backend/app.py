@@ -210,7 +210,7 @@ def analyze_video(cap):
     object_freq = {}
 
     frame_count = 0
-    MAX_FRAMES = 180   # prevent timeout
+    MAX_FRAMES = 30  # prevent timeout
 
     print("Starting video analysis...")
 
@@ -227,7 +227,7 @@ def analyze_video(cap):
             print("Stopping early to avoid timeout")
             break
 
-        if frame_count % 60 != 0:
+        if frame_count % 10 != 0:
             continue
 
         try:
@@ -236,7 +236,7 @@ def analyze_video(cap):
 
             results = model.predict(
                 frame,
-                conf=0.25,
+                conf=0.3,
                 imgsz=320,
                 device="cpu",
                 verbose=False
