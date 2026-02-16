@@ -8,7 +8,7 @@ export default function App() {
   const [file, setFile] = useState<any>(null);
   const [result, setResult] = useState("No result yet");
 
- const SERVER_URL = "https://diplostemonous-feedable-felix.ngrok-free.dev/process";
+const SERVER_URL = "https://videogpt-app.onrender.com/process";
 
 
   useEffect(() => {

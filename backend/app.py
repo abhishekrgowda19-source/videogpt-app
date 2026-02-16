@@ -21,9 +21,9 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # ================= APP INIT =================
 
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
-app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500MB max
+app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024  # 500MB limit
 
-# ================= LOAD YOLO MODEL =================
+# ================= LOAD YOLO =================
 
 print("Loading YOLO model...")
 
@@ -36,7 +36,13 @@ print("YOLO loaded successfully")
 
 video_summary = {}
 
-# ================= SUMMARY GENERATOR =================
+# ================= TEST ROUTE (IMPORTANT FOR RENDER) =================
+
+@app.route("/test")
+def test():
+    return "Backend is working"
+
+# ================= SUMMARY =================
 
 def generate_scene_summary(person_count, object_freq):
 
@@ -50,12 +56,16 @@ def generate_scene_summary(person_count, object_freq):
 
     if "laptop" in objects:
         env = "a workspace or office environment"
+
     elif "dining table" in objects:
         env = "a dining area"
+
     elif "dog" in objects:
         env = "a home environment"
+
     elif "car" in objects:
         env = "an outdoor street environment"
+
     else:
         env = "an indoor environment"
 
@@ -70,24 +80,17 @@ def generate_scene_summary(person_count, object_freq):
         f"Common objects include {objects_text}."
     )
 
-# ================= FRONTEND ROUTES =================
+# ================= FRONTEND =================
 
 @app.route("/")
 def home():
-    return send_from_directory(FRONTEND_DIR, "index.html")
-
+    return "VideoGPT Backend is running"
 
 @app.route("/uploads/<path:path>")
 def uploads(path):
     return send_from_directory(UPLOAD_DIR, path)
 
-
-@app.route("/<path:path>")
-def static_files(path):
-    return send_from_directory(FRONTEND_DIR, path)
-
-
-# ================= FILE PROCESS ROUTE =================
+# ================= PROCESS FILE =================
 
 @app.route("/process", methods=["POST"])
 def process():
@@ -121,8 +124,7 @@ def process():
 
         return jsonify({"error": str(e)}), 500
 
-
-# ================= YOUTUBE LINK PROCESS =================
+# ================= PROCESS YOUTUBE =================
 
 @app.route("/process_link", methods=["POST"])
 def process_link():
@@ -159,8 +161,7 @@ def process_link():
 
         return jsonify({"error": str(e)}), 500
 
-
-# ================= IMAGE PROCESS =================
+# ================= PROCESS IMAGE =================
 
 def process_image(path):
 
@@ -198,8 +199,7 @@ def process_image(path):
 
     return jsonify(result)
 
-
-# ================= VIDEO PROCESS =================
+# ================= PROCESS VIDEO =================
 
 def process_video(path):
 
@@ -210,7 +210,6 @@ def process_video(path):
 
     return analyze_video(cap)
 
-
 def process_video_stream(stream_url):
 
     cap = cv2.VideoCapture(stream_url)
@@ -219,7 +218,6 @@ def process_video_stream(stream_url):
         return jsonify({"error": "Cannot open stream"}), 400
 
     return analyze_video(cap)
-
 
 # ================= CORE ANALYSIS =================
 
@@ -243,7 +241,7 @@ def analyze_video(cap):
 
         frame_count += 1
 
-        # Analyze every 10th frame (fast and efficient)
+        # Analyze every 10th frame
         if frame_count % 10 != 0:
             continue
 
@@ -263,7 +261,7 @@ def analyze_video(cap):
                 if name == "person":
                     person_count += 1
 
-        print(f"Frame {frame_count} | Persons detected: {person_count}")
+        print(f"Frame {frame_count} | Persons: {person_count}")
 
     cap.release()
 
@@ -279,8 +277,7 @@ def analyze_video(cap):
 
     return jsonify(video_summary)
 
-
-# ================= CHAT ROUTE =================
+# ================= CHAT =================
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -290,8 +287,7 @@ def chat():
 
     return jsonify({"reply": video_summary["content_summary"]})
 
-
-# ================= PDF EXPORT =================
+# ================= EXPORT PDF =================
 
 @app.route("/export_pdf")
 def export_pdf():
@@ -305,14 +301,9 @@ def export_pdf():
 
     c.save()
 
-    return send_from_directory(
-        UPLOAD_DIR,
-        "report.pdf",
-        as_attachment=True
-    )
+    return send_from_directory(UPLOAD_DIR, "report.pdf", as_attachment=True)
 
-
-# ================= RUN SERVER =================
+# ================= RUN =================
 
 if __name__ == "__main__":
 
