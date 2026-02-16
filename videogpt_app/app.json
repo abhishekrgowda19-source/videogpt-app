@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "videogpt_app",
+    "slug": "videogpt_app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "extra": {
+      "eas": {
+        "projectId": "5a454e4f-58ca-4735-9973-d69d4acec671"
+      }
+    },
+    "android": {
+      "package": "com.abhishekbr123.videogpt_app"
+    }
+  }
+}
