@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify
 from ultralytics import YOLO
 import os
 import cv2
@@ -8,48 +8,70 @@ from werkzeug.utils import secure_filename
 # ================= CONFIG =================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+
 MODEL_PATH = os.path.join(BASE_DIR, "yolov8s.pt")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB limit
+
+# IMPORTANT FOR RENDER (limit size)
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
+
 
 # ================= LOAD MODEL =================
 
 print("Loading YOLO model...")
 
 try:
+
     model = YOLO(MODEL_PATH)
+
     model.to("cpu")
+
     print("YOLO loaded successfully")
+
 except Exception as e:
-    print("Model load error:", e)
+
+    print("MODEL LOAD ERROR:", e)
+
+    model = None
+
 
 video_summary = {}
 
-# ================= TEST ROUTE =================
+
+# ================= TEST ROUTES =================
 
 @app.route("/")
 def home():
-    return "VideoGPT backend running"
+    return "VideoGPT Backend Running"
+
 
 @app.route("/test")
 def test():
     return "Backend OK"
 
-# ================= PROCESS ROUTE =================
+
+# ================= PROCESS =================
 
 @app.route("/process", methods=["POST"])
 def process():
 
     try:
 
+        if model is None:
+            return jsonify({"error": "Model not loaded"}), 500
+
         if "file" not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
 
         file = request.files["file"]
+
+        if file.filename == "":
+            return jsonify({"error": "Empty filename"}), 400
 
         filename = secure_filename(file.filename)
 
@@ -63,7 +85,7 @@ def process():
 
     except Exception as e:
 
-        print("Process error:", e)
+        print("PROCESS ERROR:", e)
 
         return jsonify({"error": str(e)}), 500
 
@@ -87,10 +109,12 @@ def analyze_video(cap):
     global video_summary
 
     person_count = 0
+
     object_freq = {}
 
     frame_count = 0
-    MAX_FRAMES = 20   # CRITICAL FIX
+
+    MAX_FRAMES = 20     # VERY IMPORTANT FOR RENDER
 
     print("Starting safe analysis")
 
@@ -106,6 +130,7 @@ def analyze_video(cap):
         if frame_count > MAX_FRAMES:
             break
 
+        # analyze every 5th frame only
         if frame_count % 5 != 0:
             continue
 
@@ -114,7 +139,7 @@ def analyze_video(cap):
             results = model.predict(
                 frame,
                 conf=0.4,
-                imgsz=320,
+                imgsz=320,     # LOW SIZE = FAST
                 device="cpu",
                 verbose=False
             )
@@ -131,18 +156,25 @@ def analyze_video(cap):
                         person_count += 1
 
         except Exception as e:
+
             print("Detection error:", e)
 
         gc.collect()
 
     cap.release()
 
+    # ================= SUMMARY =================
+
     summary = f"Detected {person_count} persons. Objects: {list(object_freq.keys())}"
 
     video_summary = {
+
         "person_count": person_count,
+
         "visual_objects": list(object_freq.keys()),
+
         "content_summary": summary
+
     }
 
     print("Completed safely")
@@ -156,4 +188,8 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 10000))
 
-    app.run(host="0.0.0.0", port=port)
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
