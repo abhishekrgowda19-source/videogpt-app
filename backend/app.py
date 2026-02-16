@@ -9,7 +9,7 @@ from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-MODEL_PATH = os.path.join(BASE_DIR, "yolov8s.pt")
+MODEL_PATH = os.path.join(BASE_DIR, "yolov8n.pt")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
