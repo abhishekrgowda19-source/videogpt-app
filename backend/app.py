@@ -109,14 +109,12 @@ def analyze_video(cap):
     global video_summary
 
     person_count = 0
-
     object_freq = {}
 
     frame_count = 0
+    MAX_FRAMES = 10   # VERY IMPORTANT → prevents crash
 
-    MAX_FRAMES = 20     # VERY IMPORTANT FOR RENDER
-
-    print("Starting safe analysis")
+    print("Starting safe analysis...")
 
     while cap.isOpened():
 
@@ -127,11 +125,12 @@ def analyze_video(cap):
 
         frame_count += 1
 
+        # STOP early to prevent memory crash
         if frame_count > MAX_FRAMES:
             break
 
-        # analyze every 5th frame only
-        if frame_count % 5 != 0:
+        # analyze every 3rd frame
+        if frame_count % 3 != 0:
             continue
 
         try:
@@ -139,7 +138,7 @@ def analyze_video(cap):
             results = model.predict(
                 frame,
                 conf=0.4,
-                imgsz=320,     # LOW SIZE = FAST
+                imgsz=320,   # smaller size → less RAM
                 device="cpu",
                 verbose=False
             )
@@ -156,31 +155,23 @@ def analyze_video(cap):
                         person_count += 1
 
         except Exception as e:
-
             print("Detection error:", e)
 
         gc.collect()
 
     cap.release()
 
-    # ================= SUMMARY =================
-
     summary = f"Detected {person_count} persons. Objects: {list(object_freq.keys())}"
 
     video_summary = {
-
         "person_count": person_count,
-
         "visual_objects": list(object_freq.keys()),
-
         "content_summary": summary
-
     }
 
     print("Completed safely")
 
     return jsonify(video_summary)
-
 
 # ================= RUN =================
 

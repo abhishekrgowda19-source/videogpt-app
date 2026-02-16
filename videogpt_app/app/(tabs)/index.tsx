@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { View, Text, Button, StyleSheet, Alert, ActivityIndicator } from "react-native";
+import {
+  View,
+  Text,
+  Button,
+  StyleSheet,
+  Alert,
+  ActivityIndicator,
+  Platform
+} from "react-native";
+
 import * as ImagePicker from "expo-image-picker";
 import axios from "axios";
 
@@ -9,7 +18,7 @@ export default function App() {
   const [result, setResult] = useState("No result yet");
   const [loading, setLoading] = useState(false);
 
-  // ✅ YOUR PERMANENT RENDER BACKEND
+  // ✅ YOUR RENDER BACKEND
   const SERVER_URL = "https://videogpt-app.onrender.com/process";
 
   // ================= PERMISSION =================
@@ -22,10 +31,7 @@ export default function App() {
         await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
-        Alert.alert(
-          "Permission required",
-          "Please allow gallery access"
-        );
+        Alert.alert("Permission required");
       }
 
     })();
@@ -42,7 +48,7 @@ export default function App() {
 
         mediaTypes: ImagePicker.MediaTypeOptions.Videos,
         allowsEditing: false,
-        quality: 1,
+        quality: 0.5, // ✅ IMPORTANT reduce size
 
       });
 
@@ -50,22 +56,21 @@ export default function App() {
 
         setFile(res.assets[0]);
 
-        Alert.alert("Video Selected");
+        Alert.alert("Video selected");
 
-        console.log("Video URI:", res.assets[0].uri);
+        console.log(res.assets[0]);
 
       }
 
-    } catch (error) {
+    } catch (e) {
 
-      console.log(error);
-      Alert.alert("Video selection failed");
+      Alert.alert("Selection failed");
 
     }
 
   };
 
-  // ================= UPLOAD VIDEO =================
+  // ================= UPLOAD =================
 
   const uploadVideo = async () => {
 
@@ -79,35 +84,44 @@ export default function App() {
     try {
 
       setLoading(true);
-      setResult("Uploading and analyzing...");
+      setResult("Uploading...");
 
       const formData = new FormData();
 
       formData.append("file", {
 
-        uri: file.uri,
-        name: file.fileName || "video.mp4",
-        type: file.mimeType || "video/mp4",
+        uri:
+          Platform.OS === "android"
+            ? file.uri
+            : file.uri.replace("file://", ""),
+
+        name: "video.mp4",
+
+        type: "video/mp4",
 
       } as any);
 
-      const response = await axios({
+      console.log("Uploading...");
 
-        method: "POST",
-        url: SERVER_URL,
-        data: formData,
+      const response = await axios.post(
 
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
+        SERVER_URL,
+        formData,
 
-        timeout: 600000, // 10 min
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
 
-      });
+          timeout: 300000, // 5 min max
 
-      console.log("Server response:", response.data);
+        }
 
-      if (response.data && response.data.content_summary) {
+      );
+
+      console.log("Response:", response.data);
+
+      if (response.data.content_summary) {
 
         setResult(response.data.content_summary);
 
@@ -119,23 +133,31 @@ export default function App() {
 
     } catch (error: any) {
 
-      console.log("UPLOAD ERROR:", error);
+      console.log(error);
 
       if (error.response) {
 
+        console.log(error.response.data);
+
         setResult("Server error");
 
-      } else if (error.request) {
+      }
 
-        setResult("Cannot reach backend");
+      else if (error.request) {
 
-      } else {
+        setResult("Server not reachable");
+
+      }
+
+      else {
 
         setResult("Upload failed");
 
       }
 
-    } finally {
+    }
+
+    finally {
 
       setLoading(false);
 
@@ -149,7 +171,9 @@ export default function App() {
 
     <View style={styles.container}>
 
-      <Text style={styles.title}>VideoGPT Mobile</Text>
+      <Text style={styles.title}>
+        VideoGPT Mobile
+      </Text>
 
       <Button
         title="Select Video"
@@ -166,7 +190,7 @@ export default function App() {
       <View style={{ height: 20 }} />
 
       {loading && (
-        <ActivityIndicator size="large" color="blue" />
+        <ActivityIndicator size="large" />
       )}
 
       <Text style={styles.result}>
@@ -178,8 +202,6 @@ export default function App() {
   );
 
 }
-
-// ================= STYLE =================
 
 const styles = StyleSheet.create({
 
@@ -196,7 +218,7 @@ const styles = StyleSheet.create({
 
     fontSize: 26,
     fontWeight: "bold",
-    marginBottom: 25,
+    marginBottom: 20,
 
   },
 

@@ -1,16 +1,40 @@
 {
   "expo": {
-    "name": "videogpt_app",
+    "name": "VideoGPT",
     "slug": "videogpt_app",
     "version": "1.0.0",
     "orientation": "portrait",
+
+    "scheme": "videogptapp",
+
     "extra": {
       "eas": {
         "projectId": "5a454e4f-58ca-4735-9973-d69d4acec671"
       }
     },
+
     "android": {
-      "package": "com.abhishekbr123.videogpt_app"
-    }
+      "package": "com.abhishekbr123.videogpt_app",
+
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "CAMERA"
+      ]
+    },
+
+    "ios": {
+      "supportsTablet": true,
+
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Allow access to select videos",
+        "NSCameraUsageDescription": "Allow camera access",
+        "NSMicrophoneUsageDescription": "Allow microphone access"
+      }
+    },
+
+    "plugins": [
+      "expo-image-picker"
+    ]
   }
 }
