@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+
 import {
   View,
   Text,
@@ -18,7 +19,7 @@ export default function App() {
   const [result, setResult] = useState("No result yet");
   const [loading, setLoading] = useState(false);
 
-  // ✅ YOUR RENDER BACKEND
+  // ✅ YOUR PERMANENT BACKEND
   const SERVER_URL = "https://videogpt-app.onrender.com/process";
 
   // ================= PERMISSION =================
@@ -31,7 +32,7 @@ export default function App() {
         await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
-        Alert.alert("Permission required");
+        Alert.alert("Please allow gallery permission");
       }
 
     })();
@@ -47,36 +48,43 @@ export default function App() {
       const res = await ImagePicker.launchImageLibraryAsync({
 
         mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+
         allowsEditing: false,
-        quality: 0.5, // ✅ IMPORTANT reduce size
+
+        quality: 0.3, // VERY IMPORTANT (reduce Render crash)
 
       });
 
       if (!res.canceled) {
 
-        setFile(res.assets[0]);
+        const selected = res.assets[0];
+
+        console.log("Selected:", selected);
+
+        setFile(selected);
 
         Alert.alert("Video selected");
 
-        console.log(res.assets[0]);
-
       }
 
-    } catch (e) {
+    } catch (error) {
 
-      Alert.alert("Selection failed");
+      console.log(error);
+
+      Alert.alert("Video selection failed");
 
     }
 
   };
 
-  // ================= UPLOAD =================
+  // ================= UPLOAD VIDEO =================
 
   const uploadVideo = async () => {
 
     if (!file) {
 
       Alert.alert("Select video first");
+
       return;
 
     }
@@ -84,7 +92,8 @@ export default function App() {
     try {
 
       setLoading(true);
-      setResult("Uploading...");
+
+      setResult("Uploading and analyzing...");
 
       const formData = new FormData();
 
@@ -95,49 +104,49 @@ export default function App() {
             ? file.uri
             : file.uri.replace("file://", ""),
 
-        name: "video.mp4",
+        name: file.fileName || "video.mp4",
 
-        type: "video/mp4",
+        type: file.mimeType || "video/mp4",
 
       } as any);
 
-      console.log("Uploading...");
+      console.log("Uploading to:", SERVER_URL);
 
-      const response = await axios.post(
+      const response = await axios({
 
-        SERVER_URL,
-        formData,
+        method: "POST",
 
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
+        url: SERVER_URL,
 
-          timeout: 300000, // 5 min max
+        data: formData,
 
-        }
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
 
-      );
+        timeout: 300000, // 5 min
 
-      console.log("Response:", response.data);
+      });
 
-      if (response.data.content_summary) {
+      console.log("Server response:", response.data);
+
+      if (response.data?.content_summary) {
 
         setResult(response.data.content_summary);
 
       } else {
 
-        setResult("No result returned");
+        setResult("Analysis completed but no summary");
 
       }
 
     } catch (error: any) {
 
-      console.log(error);
+      console.log("UPLOAD ERROR:", error);
 
       if (error.response) {
 
-        console.log(error.response.data);
+        console.log("Server error:", error.response.data);
 
         setResult("Server error");
 
@@ -145,7 +154,7 @@ export default function App() {
 
       else if (error.request) {
 
-        setResult("Server not reachable");
+        setResult("Cannot reach server");
 
       }
 
@@ -203,13 +212,18 @@ export default function App() {
 
 }
 
+// ================= STYLE =================
+
 const styles = StyleSheet.create({
 
   container: {
 
     flex: 1,
+
     justifyContent: "center",
+
     alignItems: "center",
+
     padding: 20,
 
   },
@@ -217,7 +231,9 @@ const styles = StyleSheet.create({
   title: {
 
     fontSize: 26,
+
     fontWeight: "bold",
+
     marginBottom: 20,
 
   },
@@ -225,7 +241,9 @@ const styles = StyleSheet.create({
   result: {
 
     marginTop: 20,
+
     fontSize: 18,
+
     textAlign: "center",
 
   },
