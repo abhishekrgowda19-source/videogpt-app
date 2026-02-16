@@ -8,62 +8,45 @@ from werkzeug.utils import secure_filename
 # ================= CONFIG =================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-
 MODEL_PATH = os.path.join(BASE_DIR, "yolov8s.pt")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
 
-# IMPORTANT FOR RENDER (limit size)
-app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024
-
+# IMPORTANT: limit upload size (Render safe)
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
 
 # ================= LOAD MODEL =================
 
 print("Loading YOLO model...")
 
 try:
-
     model = YOLO(MODEL_PATH)
-
     model.to("cpu")
-
     print("YOLO loaded successfully")
-
 except Exception as e:
-
-    print("MODEL LOAD ERROR:", e)
-
-    model = None
-
+    print("Model load error:", e)
 
 video_summary = {}
 
-
-# ================= TEST ROUTES =================
+# ================= HEALTH ROUTES =================
 
 @app.route("/")
 def home():
-    return "VideoGPT Backend Running"
-
+    return "VideoGPT backend running"
 
 @app.route("/test")
 def test():
     return "Backend OK"
 
-
-# ================= PROCESS =================
+# ================= PROCESS ROUTE =================
 
 @app.route("/process", methods=["POST"])
 def process():
 
     try:
-
-        if model is None:
-            return jsonify({"error": "Model not loaded"}), 500
 
         if "file" not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
@@ -85,12 +68,12 @@ def process():
 
     except Exception as e:
 
-        print("PROCESS ERROR:", e)
+        print("Process error:", e)
 
         return jsonify({"error": str(e)}), 500
 
 
-# ================= VIDEO PROCESS =================
+# ================= SAFE VIDEO PROCESS =================
 
 def process_video(path):
 
@@ -102,7 +85,7 @@ def process_video(path):
     return analyze_video(cap)
 
 
-# ================= SAFE ANALYSIS =================
+# ================= MEMORY SAFE ANALYSIS =================
 
 def analyze_video(cap):
 
@@ -112,7 +95,9 @@ def analyze_video(cap):
     object_freq = {}
 
     frame_count = 0
-    MAX_FRAMES = 10   # VERY IMPORTANT → prevents crash
+
+    # CRITICAL: prevents Render crash
+    MAX_FRAMES = 8
 
     print("Starting safe analysis...")
 
@@ -125,12 +110,12 @@ def analyze_video(cap):
 
         frame_count += 1
 
-        # STOP early to prevent memory crash
+        # STOP early (IMPORTANT)
         if frame_count > MAX_FRAMES:
             break
 
-        # analyze every 3rd frame
-        if frame_count % 3 != 0:
+        # Analyze every 2nd frame only
+        if frame_count % 2 != 0:
             continue
 
         try:
@@ -138,7 +123,7 @@ def analyze_video(cap):
             results = model.predict(
                 frame,
                 conf=0.4,
-                imgsz=320,   # smaller size → less RAM
+                imgsz=320,      # LOW RAM
                 device="cpu",
                 verbose=False
             )
@@ -173,14 +158,11 @@ def analyze_video(cap):
 
     return jsonify(video_summary)
 
+
 # ================= RUN =================
 
 if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 10000))
 
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False
-    )
+    app.run(host="0.0.0.0", port=port)
