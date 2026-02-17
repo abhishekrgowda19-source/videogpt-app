@@ -8,7 +8,6 @@ from werkzeug.utils import secure_filename
 # ================= CONFIG =================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 MODEL_PATH = os.path.join(BASE_DIR, "yolov8n.pt")
 
@@ -16,33 +15,34 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
 
-# Render safe upload size
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB
+# IMPORTANT: 30MB limit (Render safe)
+app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024
+
 
 # ================= LOAD MODEL =================
 
 print("Loading YOLOv8n model...")
 
-try:
-    model = YOLO(MODEL_PATH)
-    model.to("cpu")
-    print("YOLOv8n loaded successfully")
-except Exception as e:
-    print("MODEL LOAD ERROR:", e)
+model = YOLO(MODEL_PATH)
 
-video_summary = {}
+# IMPORTANT OPTIMIZATION
+model.fuse()
 
-# ================= HEALTH ROUTES =================
+print("Model loaded successfully")
+
+
+# ================= HEALTH =================
 
 @app.route("/")
 def home():
-    return "VideoGPT backend running successfully"
+    return "Backend running OK"
 
 @app.route("/test")
 def test():
     return "Backend OK"
 
-# ================= PROCESS ROUTE =================
+
+# ================= PROCESS =================
 
 @app.route("/process", methods=["POST"])
 def process():
@@ -54,117 +54,89 @@ def process():
 
         file = request.files["file"]
 
-        if file.filename == "":
-            return jsonify({"error": "Empty filename"}), 400
-
         filename = secure_filename(file.filename)
 
         path = os.path.join(UPLOAD_DIR, filename)
 
         file.save(path)
 
-        print("Video saved:", path)
+        print("Saved:", path)
 
-        return process_video(path)
+        return analyze_video(path)
 
     except Exception as e:
 
-        print("PROCESS ERROR:", e)
+        print("Error:", e)
 
         return jsonify({"error": str(e)}), 500
 
 
-# ================= VIDEO PROCESS =================
+# ================= SAFE ANALYSIS =================
 
-def process_video(path):
+def analyze_video(path):
 
-    cap = cv2.VideoCapture(path)
+    try:
 
-    if not cap.isOpened():
-        return jsonify({"error": "Cannot open video"}), 400
+        cap = cv2.VideoCapture(path)
 
-    return analyze_video(cap)
+        if not cap.isOpened():
+            return jsonify({"error": "Cannot open video"}), 400
 
+        person_count = 0
+        object_freq = {}
 
-# ================= MEMORY SAFE ANALYSIS =================
-
-def analyze_video(cap):
-
-    global video_summary
-
-    person_count = 0
-    object_freq = {}
-
-    frame_count = 0
-
-    # CRITICAL: prevents Render crash
-    MAX_FRAMES = 6
-
-    print("Starting safe analysis...")
-
-    while cap.isOpened():
+        # CRITICAL: ONLY 1 FRAME
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 5)
 
         ret, frame = cap.read()
 
+        cap.release()
+
         if not ret:
-            break
+            return jsonify({"error": "Cannot read frame"}), 400
 
-        frame_count += 1
+        # CRITICAL: reduce resolution
+        frame = cv2.resize(frame, (320, 320))
 
-        # stop early
-        if frame_count > MAX_FRAMES:
-            break
+        # SINGLE inference only
+        results = model.predict(
+            frame,
+            conf=0.4,
+            imgsz=320,
+            device="cpu",
+            verbose=False
+        )
 
-        # analyze only every 2nd frame
-        if frame_count % 2 != 0:
-            continue
+        if results and results[0].boxes is not None:
 
-        try:
+            for box in results[0].boxes:
 
-            results = model.predict(
-                frame,
-                conf=0.5,
-                imgsz=320,
-                device="cpu",
-                verbose=False
-            )
+                name = model.names[int(box.cls[0])]
 
-            if results and results[0].boxes is not None:
+                object_freq[name] = object_freq.get(name, 0) + 1
 
-                for box in results[0].boxes:
+                if name == "person":
+                    person_count += 1
 
-                    cls = int(box.cls[0])
-                    name = model.names[cls]
 
-                    object_freq[name] = object_freq.get(name, 0) + 1
-
-                    if name == "person":
-                        person_count += 1
-
-        except Exception as e:
-
-            print("Detection error:", e)
-
-        # CRITICAL memory cleanup
-        del frame
         gc.collect()
 
-    cap.release()
+        summary = {
+            "person_count": person_count,
+            "visual_objects": list(object_freq.keys()),
+            "content_summary":
+                f"Detected {person_count} persons. Objects: {list(object_freq.keys())}"
+        }
 
-    summary = (
-        f"Detected {person_count} persons. "
-        f"Objects detected: {list(object_freq.keys())}"
-    )
+        print("SUCCESS:", summary)
 
-    video_summary = {
-        "person_count": person_count,
-        "visual_objects": list(object_freq.keys()),
-        "content_summary": summary
-    }
+        return jsonify(summary)
 
-    print("Analysis complete:", video_summary)
+    except Exception as e:
 
-    return jsonify(video_summary)
+        print("Analysis error:", e)
+
+        return jsonify({"error": str(e)}), 500
 
 
 # ================= RUN =================
@@ -173,10 +145,4 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 10000))
 
-    print("Server starting on port:", port)
-
-    app.run(
-        host="0.0.0.0",
-        port=port,
-        debug=False
-    )
+    app.run(host="0.0.0.0", port=port)
