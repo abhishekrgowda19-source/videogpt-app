@@ -4,13 +4,13 @@ gunicorn==21.2.0
 ultralytics==8.2.0
 
 opencv-python-headless==4.9.0.80
-
 numpy==1.26.4
 pillow==10.2.0
 
 yt-dlp==2024.8.6
-reportlab==4.1.0
 
+reportlab==4.1.0
 psutil==5.9.8
 pyyaml==6.0.1
-requests==2.31.0
+
+requests==2.32.3
